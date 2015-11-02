@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="app_name">Drip Steps Tracker</string>
+    <string name="connection_failed">Connection failed</string>
+    <string name="steps_goal">Steps goal</string>
+    <string name="steps_goal_summary">Enter daily steps goal</string>
+    <string name="tide">Tide</string>
+    <string name="tide_prefs_summary">Select tide level</string>
+    <string name="low_prefs_summary">Select low level</string>
+    <string name="low">Low</string>
+    <string name="dialog_message">This is a companion app to Google Fit, in order to use it you must enable Google Fit steps tracking</string>
+    <string name="dialog_title">Drip My Steps</string>
+    <string name="dialog_button">OK</string>
+    <string name="dont_show_again">Don\'t show again</string>
+</resources>

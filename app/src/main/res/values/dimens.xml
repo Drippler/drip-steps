@@ -1,0 +1,5 @@
+<resources>
+    <dimen name="drip_size">200dp</dimen>
+    <dimen name="mask_x_step">1dp</dimen>
+    <dimen name="mask_y_step">0.06dp</dimen>
+</resources>

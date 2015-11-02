@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="list_array">
+        <item>Disabled</item>
+        <item>Low</item>
+        <item>Normal</item>
+        <item>High</item>
+    </string-array>
+
+    <string-array name="list_values">
+        <item>0</item>
+        <item>3</item>
+        <item>6</item>
+        <item>18</item>
+    </string-array>
+</resources>

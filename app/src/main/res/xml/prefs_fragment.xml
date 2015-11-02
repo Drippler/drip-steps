@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <EditTextPreference
+        android:defaultValue="7500"
+        android:inputType="number"
+        android:key="steps_goal"
+        android:numeric="integer"
+        android:summary="@string/steps_goal_summary"
+        android:title="@string/steps_goal"/>
+
+    <ListPreference
+        android:defaultValue="3"
+        android:entries="@array/list_array"
+        android:entryValues="@array/list_values"
+        android:key="tide_level"
+        android:summary="@string/tide_prefs_summary"
+        android:title="@string/tide"/>
+
+    <ListPreference
+        android:defaultValue="0"
+        android:entries="@array/list_array"
+        android:entryValues="@array/list_values"
+        android:key="low_level"
+        android:summary="@string/low_prefs_summary"
+        android:title="@string/low"/>
+</PreferenceScreen>
