@@ -24,12 +24,13 @@ public class AuthHelper {
 				.build();
 	}
 
-	public void onStart() {
-		if (client != null)
+	public void start() {
+		if (client != null) {
 			client.connect();
+		}
 	}
 
-	public void onStop() {
+	public void stop() {
 		if (client != null && client.isConnected()) {
 			client.disconnect();
 		}

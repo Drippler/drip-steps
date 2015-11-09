@@ -73,21 +73,21 @@ public class MainActivity extends Activity implements GoogleApiClient.Connection
 
 	private void dialogShowed() {
 		dialogShown = true;
-		authHelper.onStart();
+		authHelper.start();
 	}
 
 	@Override
 	protected void onStart() {
 		super.onStart();
 		if (dialogShown) {
-			authHelper.onStart();
+			authHelper.start();
 		}
 	}
 
 	@Override
 	protected void onStop() {
 		super.onStop();
-		authHelper.onStop();
+		authHelper.stop();
 	}
 
 	@Override

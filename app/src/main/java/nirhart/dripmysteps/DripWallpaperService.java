@@ -30,12 +30,15 @@ import android.view.WindowManager;
 import com.google.android.gms.common.ConnectionResult;
 import com.google.android.gms.common.api.GoogleApiClient;
 
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-public class DripWallpaperService extends WallpaperService implements GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, StepsHelper.OnStepsCountFetchedListener, SharedPreferences.OnSharedPreferenceChangeListener {
+public class DripWallpaperService extends WallpaperService implements SharedPreferences.OnSharedPreferenceChangeListener {
 
-	private final static int FOLLOW_SCREEN_ROTATION_FACTOR = 50; // 1 means follow immediately, bigger number means slowly follow the screen rotation
-	private final static long STEPS_CHECK_INTERVAL = TimeUnit.MINUTES.toMillis(1);
+	final static long STEPS_CHECK_INTERVAL = TimeUnit.MINUTES.toMillis(1);
+	private final static int FOLLOW_SCREEN_ROTATION_FACTOR = 40; // 1 means follow immediately, bigger number means slowly follow the screen rotation
 	private static final double MAX_ANGLE_CHANGE_IN_FRAME = 1.5;
 	private static final String TIDE_LEVEL = "tide_level";
 	private static final String STEPS_GOAL = "steps_goal";
@@ -43,32 +46,21 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 	private static final String LOW_LEVEL_DEFAULT = "0";
 	private static final String TIDE_LEVEL_DEFAULT = "3";
 	private static final String LOW_LEVEL = "low_level";
-	private SensorHelper sensorHelper;
-	private double phoneAngle = 0;
-	private AuthHelper authHelper;
-	private StepsHelper stepsHelper;
+	private final ExecutorService ex;
 	private int stepsGoal;
-	private float zeroLevel, topLevel;
-	private float offsetY;
 	private float low, tide;
 	private long lastStepsCheck;
-	private int rotation;
-	private int lastOrientation = -1;
-	private Point locationOfDrip;
 	private Display display;
 
 	public DripWallpaperService() {
+		// Single thread pool with 1 min time of idle thread
+		this.ex = new ThreadPoolExecutor(1, 1, 1, TimeUnit.MINUTES, new LinkedBlockingQueue<Runnable>());
 	}
 
 	@Override
 	public Engine onCreateEngine() {
-		authHelper = new AuthHelper();
-		authHelper.buildFitnessClient(this, this, this);
-		authHelper.onStart();
 
-		stepsHelper = new StepsHelper(authHelper.getClient(), this);
-		display = ((WindowManager) getApplicationContext().getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
-
+		this.display = ((WindowManager) getApplicationContext().getSystemService(Context.WINDOW_SERVICE)).getDefaultDisplay();
 		SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
 		prefs.registerOnSharedPreferenceChangeListener(this);
 
@@ -79,37 +71,6 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 		stepsGoal = Integer.parseInt(prefs.getString(STEPS_GOAL, STEPS_GOAL_DEFAULT));
 
 		return new DripWallpaperEngine();
-	}
-
-	@Override
-	public void onConnected(Bundle bundle) {
-	}
-
-	@Override
-	public void onConnectionSuspended(int i) {
-	}
-
-	@Override
-	public void onConnectionFailed(ConnectionResult connectionResult) {
-	}
-
-	@Override
-	public void onStepsCountFetched(int count) {
-		float percent = (float) count / (float) stepsGoal;
-
-		if (percent > 1)
-			percent = 1;
-
-		// Allow a minimum fill of 5% so the drip will not be empty
-		if (percent < 0.05)
-			percent = 0.05f;
-
-		// Change the sea level according to the new steps
-		setOffsetY((int) (zeroLevel + percent * (topLevel - zeroLevel)));
-	}
-
-	public void setOffsetY(float offsetY) {
-		this.offsetY = offsetY - 100; // 100 is the transparent y part of wave.png
 	}
 
 	@Override
@@ -130,25 +91,9 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 
 	@Override
 	public void onDestroy() {
-		if (sensorHelper != null)
-			sensorHelper.destroy();
 		PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).unregisterOnSharedPreferenceChangeListener(this);
-		authHelper.onStop();
+		ex.shutdown();
 		super.onDestroy();
-	}
-
-	/**
-	 * Check if the orientation is changed
-	 * this will fetch mirror orientation as well as 90 degrees orientation change
-	 */
-	@SuppressWarnings("ResourceType")
-	public void refreshOrientation() {
-		if (lastOrientation != display.getRotation()) {
-			// Enforce new steps check in order to calculate the new yOffset of sea level
-			lastStepsCheck = 0;
-			lastOrientation = display.getRotation();
-			rotation = getRotation(lastOrientation);
-		}
 	}
 
 	/**
@@ -170,23 +115,34 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 		}
 	}
 
-	public class DripWallpaperEngine extends Engine implements SensorHelper.OnAngleChangedListener {
+	public class DripWallpaperEngine extends Engine implements SensorHelper.OnAngleChangedListener, GoogleApiClient.ConnectionCallbacks, GoogleApiClient.OnConnectionFailedListener, StepsHelper.OnStepsCountFetchedListener {
 
 		private final Runnable drawRunner;
+		private final Runnable backgroundRunner;
 		private final Handler handler;
-		private boolean visible;
 		private final Matrix shaderMatrix;
+		private final float maskXStep;
+		private float zeroLevel, topLevel;
+		private float offsetY;
+		private int rotation;
+		private int lastOrientation = -1;
+		private Point locationOfDrip;
+		private double phoneAngle = 0;
+		private boolean visible;
 		private Drawable wave;
 		private int width, height;
 		private BitmapShader shader;
 		private Paint paint;
 		private float maskX, maskY;
-		private final float maskXStep;
 		private float maskYStep;
 		private float waterRotation;
 		private Bitmap backgroundBitmap;
 		private Rect textRect;
 		private boolean redrawEverything;
+		private SensorHelper sensorHelper;
+		private AuthHelper authHelper;
+		private StepsHelper stepsHelper;
+		private double finalAngle = 0;
 
 		public DripWallpaperEngine() {
 			initPaint();
@@ -205,13 +161,81 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 				}
 			};
 
-			initSensor();
+			// Stuff to do every frame in a background thread
+			this.backgroundRunner = new Runnable() {
+				@Override
+				public void run() {
+					checkSteps();
+					// Follow screen rotation outside the UI Thread
+					followScreenRotation();
+					// Set the sea shader according to its x/y/rotation values
+					shaderMatrix.setTranslate(maskX, maskY + offsetY);
+					shaderMatrix.postRotate(waterRotation, width / 2, height / 2);
+					shader.setLocalMatrix(shaderMatrix);
+
+					// Move the wave horizontally
+					maskX += maskXStep;
+					if (maskX > wave.getIntrinsicWidth())
+						maskX -= wave.getIntrinsicWidth();
+
+					// Move the wave vertically
+					maskY += maskYStep;
+					if (maskY > tide) {
+						maskYStep *= -1;
+					}
+
+					if (maskY < low) {
+						maskYStep *= -1;
+					}
+				}
+			};
+
+			startListeners();
 		}
 
-		private void initSensor() {
-			sensorHelper = new SensorHelper(getApplicationContext());
-			sensorHelper.start();
-			sensorHelper.setListener(this);
+		public void setOffsetY(float offsetY) {
+			this.offsetY = offsetY - 100; // 100 is the transparent y part of wave.png
+		}
+
+		/**
+		 * Check if the orientation is changed
+		 * this will fetch mirror orientation as well as 90 degrees orientation change
+		 */
+		@SuppressWarnings("ResourceType")
+		public void refreshOrientation() {
+			if (lastOrientation != display.getRotation()) {
+				// Enforce new steps check in order to calculate the new yOffset of sea level
+				lastStepsCheck = 0;
+				lastOrientation = display.getRotation();
+				rotation = getRotation(lastOrientation);
+			}
+		}
+
+		@Override
+		public void onConnected(Bundle bundle) {
+		}
+
+		@Override
+		public void onConnectionSuspended(int i) {
+		}
+
+		@Override
+		public void onConnectionFailed(ConnectionResult connectionResult) {
+		}
+
+		@Override
+		public void onStepsCountFetched(int count) {
+			float percent = (float) count / (float) stepsGoal;
+
+			if (percent > 1)
+				percent = 1;
+
+			// Allow a minimum fill of 5% so the drip will not be empty
+			if (percent < 0.05)
+				percent = 0.05f;
+
+			// Change the sea level according to the new steps
+			setOffsetY((int) (zeroLevel + percent * (topLevel - zeroLevel)));
 		}
 
 		private void initPaint() {
@@ -224,10 +248,14 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 		@Override
 		public void onVisibilityChanged(boolean visible) {
 			this.visible = visible;
+
 			if (visible) {
+				startListeners();
 				redrawEverything = true;
 				lastStepsCheck = 0;
 				doFrame();
+			} else {
+				stopListeners();
 			}
 		}
 
@@ -236,6 +264,7 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 			super.onSurfaceDestroyed(holder);
 
 			this.visible = false;
+			stopListeners();
 		}
 
 		@Override
@@ -274,8 +303,6 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 				}
 			}
 
-			checkSteps();
-
 			if (visible) {
 				doFrame();
 			}
@@ -283,6 +310,7 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 
 		private void doFrame() {
 			handler.post(drawRunner);
+			ex.execute(backgroundRunner);
 		}
 
 		/**
@@ -296,36 +324,16 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 		}
 
 		private void draw(Canvas canvas) {
-			// Set the sea shader according to its x/y/rotation values
-			shaderMatrix.setTranslate(maskX, maskY + offsetY);
-			shaderMatrix.postRotate(waterRotation, width / 2, height / 2);
-			shader.setLocalMatrix(shaderMatrix);
-
 			try {
 				canvas.drawBitmap(backgroundBitmap, 0, 0, paint);
+				redrawEverything = false;
 			} catch (Exception ignore) {
-				buildBitmap(canvas.getWidth(), canvas.getHeight());
+				redrawEverything = true;
 				canvas.drawColor(CompatUtils.getColor(getApplicationContext(), R.color.background_color));
-			}
-
-			// Move the wave horizontally
-			maskX += maskXStep;
-			if (maskX > wave.getIntrinsicWidth())
-				maskX -= wave.getIntrinsicWidth();
-
-			// Move the wave vertically
-			maskY += maskYStep;
-			if (maskY > tide) {
-				maskYStep *= -1;
-			}
-
-			if (maskY < low) {
-				maskYStep *= -1;
 			}
 
 			// Draw the drip with the water shader
 			canvas.drawText("\uE900", locationOfDrip.x, locationOfDrip.y, paint);
-			redrawEverything = false;
 		}
 
 		private void initDimensParam(int width, int height) {
@@ -436,40 +444,71 @@ public class DripWallpaperService extends WallpaperService implements GoogleApiC
 
 		@Override
 		public void onAngleChangedListener(double angle) {
-			double mAngle = phoneAngle;
-			double plus = angle - mAngle;
-			double minus = 360 - angle + mAngle;
+			finalAngle = angle;
+		}
 
-			// Calculate the new angle
-			if (mAngle > angle) {
-				plus = 360 + plus;
-				minus = minus - 360;
-			}
-
-			// Find what is the shortest path to the new angle (+ or -)
-			if (plus < minus) {
-				mAngle += Math.min(MAX_ANGLE_CHANGE_IN_FRAME, plus / FOLLOW_SCREEN_ROTATION_FACTOR);
-			} else {
-				mAngle -= Math.min(MAX_ANGLE_CHANGE_IN_FRAME, minus / FOLLOW_SCREEN_ROTATION_FACTOR);
-			}
+		private void followScreenRotation() {
+			double angle = finalAngle;
 			int d = (int) Math.abs(angle - phoneAngle) % 360;
 			int r = d > 180 ? 360 - d : d;
 
 			// Change the angle only when there is a certain threshold from the previous angle
 			// this is in order to avoid vibration in the drip
-			if (r > 2)
+			if (r > 2) {
+				double mAngle = phoneAngle;
+				double plus = angle - mAngle;
+				double minus = 360 - angle + mAngle;
+
+				// Calculate the new angle
+				if (mAngle > angle) {
+					plus = 360 + plus;
+					minus = minus - 360;
+				}
+				// Find what is the shortest path to the new angle (+ or -)
+				if (plus < minus) {
+					mAngle += Math.min(MAX_ANGLE_CHANGE_IN_FRAME, plus / FOLLOW_SCREEN_ROTATION_FACTOR);
+				} else {
+					mAngle -= Math.min(MAX_ANGLE_CHANGE_IN_FRAME, minus / FOLLOW_SCREEN_ROTATION_FACTOR);
+				}
+
 				phoneAngle = mAngle;
 
-			if (phoneAngle > 360) {
-				phoneAngle = phoneAngle - 360;
+				if (phoneAngle > 360) {
+					phoneAngle = phoneAngle - 360;
+				}
+
+				if (phoneAngle < 0) {
+					phoneAngle = 360 + phoneAngle;
+				}
+
+				waterRotation = 90 - (float) phoneAngle - rotation;
+
+				refreshOrientation();
 			}
-			if (phoneAngle < 0) {
-				phoneAngle = 360 + phoneAngle;
+		}
+
+		private void startListeners() {
+			if (sensorHelper == null) {
+				sensorHelper = new SensorHelper(getApplicationContext());
 			}
 
-			waterRotation = 90 - (float) phoneAngle - rotation;
+			if (authHelper == null) {
+				authHelper = new AuthHelper();
+				authHelper.buildFitnessClient(getApplicationContext(), this, this);
+				stepsHelper = new StepsHelper(authHelper.getClient(), this);
+			}
 
-			refreshOrientation();
+			sensorHelper.start();
+			sensorHelper.setListener(this);
+
+			authHelper.start();
+		}
+
+		private void stopListeners() {
+			if (sensorHelper != null)
+				sensorHelper.stop();
+			if (authHelper != null)
+				authHelper.stop();
 		}
 	}
 }

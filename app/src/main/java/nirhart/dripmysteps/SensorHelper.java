@@ -9,7 +9,7 @@ import android.hardware.SensorManager;
 public class SensorHelper implements SensorEventListener {
 
 	public final Context context;
-	private SensorManager mSensorManager;
+	private SensorManager sensorManager;
 	private OnAngleChangedListener listener;
 
 	public SensorHelper(Context context) {
@@ -17,15 +17,16 @@ public class SensorHelper implements SensorEventListener {
 	}
 
 	public void start() {
-		mSensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-		mSensorManager.registerListener(this, mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_NORMAL);
+		if (sensorManager == null)
+			sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+		sensorManager.registerListener(this, sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER), SensorManager.SENSOR_DELAY_NORMAL);
 	}
 
-	public void destroy() {
-		if (mSensorManager == null) {
+	public void stop() {
+		if (sensorManager == null) {
 			return;
 		}
-		mSensorManager.unregisterListener(this);
+		sensorManager.unregisterListener(this);
 	}
 
 	@Override
@@ -41,15 +42,16 @@ public class SensorHelper implements SensorEventListener {
 	}
 
 	/**
-	 * Update the gravity point only if a significant change was made since the last measurement
+	 * Update the gravity point only if a the gravity vector is longer than the threshold
 	 *
 	 * @param x - x value from accelerometer
 	 * @param y - y value from accelerometer
 	 */
 	public void updatePoint(float x, float y) {
 		if (Math.sqrt(x * x + y * y) > 1.5)
-			if (listener != null)
+			if (listener != null) {
 				listener.onAngleChangedListener(getAngle(x, -y));
+			}
 	}
 
 	/**

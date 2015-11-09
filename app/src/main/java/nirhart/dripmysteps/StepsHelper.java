@@ -13,7 +13,8 @@ import com.google.android.gms.fitness.result.DataReadResult;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 public class StepsHelper {
@@ -24,8 +25,9 @@ public class StepsHelper {
 
 	public StepsHelper(GoogleApiClient client, OnStepsCountFetchedListener listener) {
 		this.client = client;
-		this.ex = Executors.newCachedThreadPool();
 		this.listener = listener;
+		// Single thread pool with double of STEPS_CHECK_INTERVAL time of idle thread
+		this.ex = new ThreadPoolExecutor(1, 1, DripWallpaperService.STEPS_CHECK_INTERVAL * 2, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>());
 	}
 
 	public void fetchStepsCount() {
