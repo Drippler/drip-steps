@@ -31,9 +31,7 @@ public class SensorHelper implements SensorEventListener {
 
 	@Override
 	public void onSensorChanged(SensorEvent event) {
-		if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) {
-			updatePoint(event.values[0], event.values[1]);
-		}
+		updatePoint(event.values[0], event.values[1]);
 	}
 
 	@Override

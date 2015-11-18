@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <string name="app_name">Drip Steps Tracker</string>
+    <string name="app_name">Drippler Live Wallpaper</string>
     <string name="connection_failed">Connection failed</string>
     <string name="steps_goal">Steps goal</string>
     <string name="steps_goal_summary">Enter daily steps goal</string>
