@@ -1,3 +1,5 @@
+###### This is an #AndroidExperiments https://www.androidexperiments.com/experiment/steps-tracking-live-wallpaper
+
 # Drip Steps Tracker
 Android Live Wallpaper to track your daily steps. Your daily progress is shown as a water drop filling in towards your daily goal. 
 
